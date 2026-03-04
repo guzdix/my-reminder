@@ -6,8 +6,8 @@ self.addEventListener('push', (event) => {
     body: data.body,
     icon: '/pwa-192x192.png',
     badge: '/pwa-192x192.png',
-    vibrate: [500, 110, 500, 110, 450, 110, 200],
-    requireInteraction: true, // Notifikasi tidak hilang sampai diklik
+    vibrate: [500, 100, 500, 100, 500],
+    requireInteraction: true, // Notifikasi tetap ada sampai diklik
     tag: 'alarm-task',
     data: { url: '/' }
   };
