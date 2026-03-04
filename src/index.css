@@ -18,4 +18,8 @@ html, body, #root {
   padding: 0;
   background-color: #ffffff;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 0px; }
