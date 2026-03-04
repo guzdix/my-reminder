@@ -106,6 +106,31 @@ export default function App() {
     year: 'numeric'
   });
 
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      todos.forEach((todo) => {
+        if (todo.time === currentTime && !todo.is_completed && !notifiedTasks.has(todo.id)) {
+          
+          // Kirim perintah ke Service Worker untuk munculkan notifikasi
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+              type: 'SHOW_REMINDER',
+              payload: { title: todo.title, time: todo.time }
+            });
+          }
+
+          setNotifiedTasks((prev) => new Set(prev).add(todo.id));
+        }
+      });
+    };
+
+    const timer = setInterval(checkReminders, 30000);
+    return () => clearInterval(timer);
+  }, [todos, notifiedTasks]);
+
   return (
     <div className="w-screen h-screen bg-white font-sans overflow-hidden flex flex-col relative">
       {/* Splash Screen */}
