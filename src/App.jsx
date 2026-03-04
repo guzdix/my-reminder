@@ -96,11 +96,37 @@ export default function App() {
     await supabase.from('todos').delete().eq('id', id);
   };
 
+  // src/App.jsx
+
+  // Fungsi untuk mendaftarkan Push Notification
+  const subscribeUserToPush = async () => {
+    const registration = await navigator.serviceWorker.ready;
+    
+    // Ganti PUBLIC_VAPID_KEY dengan hasil dari terminal tadi
+    const subscribeOptions = {
+      userVisibleOnly: true,
+      applicationServerKey: 'BMq4gf4M5Eq7YdhcpV2QbSom--POnGMUG5q8NCXp_6JghVwdeZRny9nXV2nPyu5aQGBBQGsIALoS_CzET7XmGj8'
+    };
+
+    const subscription = await registration.pushManager.subscribe(subscribeOptions);
+    
+    // Simpan subscription ini ke tabel baru di Supabase bernama 'subscribers'
+    await supabase.from('subscribers').upsert([{ 
+      user_id: 'pribadi', // karena ini untuk kamu sendiri
+      subscription: JSON.stringify(subscription) 
+    }]);
+    
+    console.log('HP berhasil terdaftar untuk Push Alarm!');
+  };
+
+  // Di fungsi handleStart, panggil fungsi di atas
   const handleStart = async () => {
-    if ("Notification" in window) await Notification.requestPermission();
-    alarmAudio.current.play().then(() => {
-      alarmAudio.current.pause();
-    }).catch(() => {});
+    if ("Notification" in window) {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        await subscribeUserToPush();
+      }
+    }
     setShowSplash(false);
   };
 
