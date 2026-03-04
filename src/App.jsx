@@ -1,197 +1,99 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import Header from './components/Header';
-import TodoList from './components/TodoList'; // Pastikan TodoList menghandle list atau map di sini
-import TodoItem from './components/TodoItem';
+import { Plus, CheckCircle2, Circle, ChevronLeft } from 'lucide-react';
 import SplashBanner from './components/SplashBanner';
 import TodoModal from './components/TodoModal';
-import { Plus } from 'lucide-react';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const [todos, setTodos] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTodo, setEditingTodo] = useState(null);
-  const [todos, setTodos] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [notifiedTasks, setNotifiedTasks] = useState(new Set());
 
-  // 1. Ambil data awal dari Supabase
   const fetchTodos = async () => {
-    const { data, error } = await supabase
-      .from('todos')
-      .select('*')
-      .order('created_at', { ascending: true });
-    
-    if (error) {
-      console.error('Error fetching todos:', error);
-    } else {
-      setTodos(data || []);
-    }
-    setIsLoading(false);
+    const { data } = await supabase.from('todos').select('*').order('created_at', { ascending: true });
+    if (data) setTodos(data);
   };
 
-  // 2. Setup Realtime Listener & Initial Fetch
   useEffect(() => {
     fetchTodos();
-
-    // Berlangganan perubahan tabel 'todos' secara realtime
-    const channel = supabase
-      .channel('realtime-todos')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'todos' },
-        (payload) => {
-          console.log('Change received!', payload);
-          fetchTodos(); // Ambil data terbaru setiap ada perubahan (Insert/Update/Delete)
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const channel = supabase.channel('db-sync').on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, () => fetchTodos()).subscribe();
+    return () => supabase.removeChannel(channel);
   }, []);
 
-  // 3. Fungsi Simpan ke Supabase (Add & Edit)
-  const handleSaveTodo = async (formData) => {
-    if (editingTodo) {
-      // Logic Update
-      const { error } = await supabase
-        .from('todos')
-        .update({ 
-          title: formData.title, 
-          time: formData.time 
-        })
-        .eq('id', editingTodo.id);
-      
-      if (error) console.error('Error updating:', error);
-    } else {
-      // Logic Insert
-      const { error } = await supabase
-        .from('todos')
-        .insert([{ 
-          title: formData.title, 
-          time: formData.time, 
-          is_completed: false 
-        }]);
-      
-      if (error) console.error('Error inserting:', error);
-    }
-    setEditingTodo(null);
-    setIsModalOpen(false);
-  };
-
-  // 4. Update Status Checkbox
-  const toggleTodo = async (todo) => {
-    if (navigator.vibrate) {
-      navigator.vibrate(50); 
-    }
-    
-    const { error } = await supabase
-      .from('todos')
-      .update({ is_completed: !todo.is_completed })
-      .eq('id', todo.id);
-
-    if (error) console.error('Error toggling status:', error);
-  };
-
-  const handleEditClick = (todo) => {
-    setEditingTodo(todo);
-    setIsModalOpen(true);
-  };
-
-  // Format Tanggal Hari Ini
-  const todayDate = new Date().toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric'
-  });
-
+  // LOGIC ALARM/REMINDER
   useEffect(() => {
     const checkReminders = () => {
       const now = new Date();
       const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-      todos.forEach((todo) => {
+      
+      todos.forEach(todo => {
         if (todo.time === currentTime && !todo.is_completed && !notifiedTasks.has(todo.id)) {
-          
-          // Kirim perintah ke Service Worker untuk munculkan notifikasi
           if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({
-              type: 'SHOW_REMINDER',
-              payload: { title: todo.title, time: todo.time }
-            });
+            navigator.serviceWorker.controller.postMessage({ type: 'SHOW_REMINDER', payload: { title: todo.title, time: todo.time } });
+            setNotifiedTasks(prev => new Set(prev).add(todo.id));
           }
-
-          setNotifiedTasks((prev) => new Set(prev).add(todo.id));
         }
       });
     };
-
-    const timer = setInterval(checkReminders, 30000);
-    return () => clearInterval(timer);
+    const interval = setInterval(checkReminders, 30000);
+    return () => clearInterval(interval);
   }, [todos, notifiedTasks]);
 
+  const handleSave = async (formData) => {
+    if (editingTodo) {
+      await supabase.from('todos').update(formData).eq('id', editingTodo.id);
+    } else {
+      await supabase.from('todos').insert([{ ...formData, is_completed: false }]);
+    }
+    setIsModalOpen(false); setEditingTodo(null);
+  };
+
+  const toggleComplete = async (todo) => {
+    if (navigator.vibrate) navigator.vibrate(50);
+    await supabase.from('todos').update({ is_completed: !todo.is_completed }).eq('id', todo.id);
+  };
+
+  const handleStart = async () => {
+    if ("Notification" in window) await Notification.requestPermission();
+    setShowSplash(false);
+  };
+
   return (
-    <div className="w-screen h-screen bg-white font-sans overflow-hidden flex flex-col relative">
-      {/* Splash Screen */}
-      {showSplash && <SplashBanner onGetStarted={() => setShowSplash(false)} />}
+    <div className="w-full h-screen bg-white flex flex-col relative overflow-hidden">
+      {showSplash && <SplashBanner onGetStarted={handleStart} />}
+      
+      <header className="flex justify-between items-center p-5 border-b border-gray-50">
+        <ChevronLeft className="w-6 h-6 text-gray-400" />
+        <h1 className="text-lg font-bold text-gray-800">Todo List</h1>
+        <div className="w-6" />
+      </header>
 
-      {!showSplash && (
-        <div className="flex flex-col h-full w-full animate-fade-in bg-gray-50">
-          <Header />
-          
-          <main className="flex-1 px-5 py-6 overflow-y-auto pb-24">
-            <h2 className="text-2xl font-bold text-gray-900">Today</h2>
-            <p className="text-sm text-gray-500 mt-1 mb-6 font-medium">{todayDate}</p>
-            
-            <div className="space-y-3">
-              {isLoading ? (
-                <p className="text-center text-gray-400 mt-10 text-sm">Loading tasks...</p>
-              ) : todos.length > 0 ? (
-                todos.map(todo => (
-                  <div key={todo.id} onClick={() => handleEditClick(todo)} className="cursor-pointer">
-                    <TodoItem 
-                      title={todo.title} 
-                      time={todo.time} 
-                      isCompleted={todo.is_completed} 
-                      onToggle={(e) => {
-                        e.stopPropagation(); 
-                        toggleTodo(todo);
-                      }} 
-                    />
-                  </div>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 opacity-60">
-                  <div className="w-16 h-16 bg-gray-200 rounded-full mb-4 flex items-center justify-center">
-                     <span className="text-2xl">☕</span>
-                  </div>
-                  <p className="text-gray-500 font-medium">No tasks yet.</p>
-                </div>
-              )}
+      <main className="flex-1 overflow-y-auto px-5 py-6 pb-28">
+        <h2 className="text-3xl font-black text-gray-900">Today</h2>
+        <p className="text-gray-400 font-medium mb-8">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
+        
+        <div className="space-y-4">
+          {todos.map(todo => (
+            <div key={todo.id} onClick={() => handleEditClick(todo)} className={`flex items-center justify-between p-5 rounded-3xl border transition-all ${todo.is_completed ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white border-gray-100 shadow-sm'}`}>
+              <div className="flex items-center gap-4">
+                <button onClick={(e) => { e.stopPropagation(); toggleComplete(todo); }}>
+                  {todo.is_completed ? <CheckCircle2 className="text-primary w-7 h-7" /> : <Circle className="text-gray-200 w-7 h-7" />}
+                </button>
+                <span className={`font-bold ${todo.is_completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{todo.title}</span>
+              </div>
+              <span className="text-xs font-bold text-gray-400">{todo.time}</span>
             </div>
-          </main>
-
-          {/* Floating Action Button */}
-          <button 
-            onClick={() => { setEditingTodo(null); setIsModalOpen(true); }}
-            className="fixed bottom-8 right-6 w-14 h-14 bg-primary rounded-full flex items-center justify-center text-white shadow-xl z-40 hover:scale-105 active:scale-95 transition-all"
-          >
-            <Plus className="w-8 h-8" />
-          </button>
+          ))}
         </div>
-      )}
+      </main>
 
-      {/* Modal Add/Edit */}
-      <TodoModal 
-        isOpen={isModalOpen} 
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditingTodo(null);
-        }} 
-        onSave={handleSaveTodo}
-        editingTodo={editingTodo}
-      />
+      <button onClick={() => { setEditingTodo(null); setIsModalOpen(true); }} className="fixed bottom-8 right-6 w-16 h-16 bg-primary rounded-full flex items-center justify-center text-white shadow-2xl shadow-primary/40 active:scale-90 transition-transform">
+        <Plus className="w-8 h-8" />
+      </button>
+
+      <TodoModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} editingTodo={editingTodo} />
     </div>
   );
 }
